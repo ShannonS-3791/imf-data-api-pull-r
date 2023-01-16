@@ -93,8 +93,6 @@ getIMF_MetaData <- function(db_NamesID) {
 ##+ 
 #******************************************************************************#
 
-rm(url_imf_data,data_df,i,j,u,db_code,indic_code,dbIndicators_table,url_imf_data_db,country_sub,country_sub_list)
-
 getIMF_Data <- function(dbIndicators_table) {
   
   # Compact Data URL --

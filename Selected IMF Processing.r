@@ -50,11 +50,3 @@ date_start <- '2012'
 date_end <- '2022'
 
 imf_data <- getIMF_Data(imf_Indicators_Full)
-Footer
-© 2022 GitHub, Inc.
-Footer navigation
-Terms
-Privacy
-Security
-Status
-Docs
