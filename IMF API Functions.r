@@ -92,7 +92,8 @@ getIMF_Data <- function(dsID,indicatorID,iso,date_start,date_end) {
   data_df <- data.frame()
   
   # Get countries to pull. Will split if there is more than 10
-    if (dsID =="PCPS") {countries = "W00"
+    if (dsID =="PCPS") {
+      countries = "W00"
     } else {countries = iso}
     
   country_split <- split(countries, ceiling(seq_along(countries)/10))
