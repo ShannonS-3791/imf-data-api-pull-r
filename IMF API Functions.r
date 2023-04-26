@@ -1,31 +1,28 @@
 # IMF API FUNCTIONS ############################################################
 # ! MUST RUN/SAVE THESE BEFORE PULLING IN IMF DATA
 #******************************************************************************#
-#*
-#*
+
 #******************************************************************************#
 # Function: Get Database Name and Description ----------------------------------
 ##+ Saves on Databases you are observing
 #******************************************************************************#
 
-getIMF_DbInfo <- function(DB_table) {
+getIMF_dsInfo <- function() {
   #Note: DB_Table must be a table with the Database ID/Codes in a column "database_id"
   
-  ## Pull List of Database IDs and Names from IMF API
-  url_imf_datainfo <- 'http://dataservices.imf.org/REST/SDMX_JSON.svc/Dataflow'
-  datainfo_imp <- fromJSON(url_imf_datainfo)
+  ## Pull full Dataset information from IMF API
+  url_imf_dsInfo <- 'http://dataservices.imf.org/REST/SDMX_JSON.svc/Dataflow'
+  ds_imp <- fromJSON(url_imf_dsInfo)
   
-  datainfo_id <- datainfo_imp$Structure$Dataflows$Dataflow$KeyFamilyRef$KeyFamilyID
-  datainfo_name <- datainfo_imp$Structure$Dataflows$Dataflow$Name$`#text`
-  datainfo_final <- data.frame(database_id = datainfo_id, db_name = datainfo_name) %>%
-    mutate(database_name = gsub(r"{\s*\([^\)]+\)}","",as.character(db_name))) %>%
-    select(-db_name)
+  # Pull out the ID and Name
+  ds_id <- ds_imp$Structure$Dataflows$Dataflow$KeyFamilyRef$KeyFamilyID
+  ds_name <- ds_imp$Structure$Dataflows$Dataflow$Name$`#text`
+  ds_final <- data.frame(dataset_id = ds_id, ds_name) %>%
+    mutate(dataset_name = gsub(r"{\s*\([^\)]+\)}","",as.character(ds_name))) %>%
+    select(-ds_name)
   
-  ## Filter to only relevant Databases
-  table <- datainfo_final %>%
-    subset(database_id %in% DB_table$database_id) %>%
-    
-    return(table)
+  return(ds_final)
+  
 }
 
 
@@ -34,58 +31,51 @@ getIMF_DbInfo <- function(DB_table) {
 ##+ 
 #******************************************************************************#
 
-getIMF_MetaData <- function(db_NamesID) {
+getIMF_MetaData <- function(dsID) {
   
   #IMF Metadata URL
   url_imf_metadata <- 'http://dataservices.imf.org/REST/SDMX_JSON.svc/GenericMetadata'
-  
-  #Prepare Blank Data Frame
-  meta_data_df <- data.frame()
-  
-  ## First Loop: Pull Metadata for Each Database ----
-  for (i in rownames(db_NamesID)) {
-    
-    ### Set DB and corresponding URL
-    database_id <- as.character(db_NamesID[i,"database_id"])
-    url_imf_metadata_db <- sprintf('%s/%s/', url_imf_metadata, database_id)
+
+    ### Set URL with respective dataset ID
+  url_imf_metadata_ds <- sprintf('%s/%s/', url_imf_metadata, dsID)
     
     ### Pull full data from JSON
-    metadata_imp <- fromJSON(url_imf_metadata_db)
+    metadata_imp <- fromJSON(url_imf_metadata_ds)
     # assign(paste("metadata_imp", database_id, sep="_"), metadata_imp) #Keeps original import for reference
     
     ### Only Keep section that we need
    metadata01 <- metadata_imp[["GenericMetadata"]][["MetadataSet"]][["AttributeValueSet"]][["ReportedAttribute"]]
     length_metadata <- length(lapply(metadata01,length))
     
-    ## Second Loop: Look at each part of list and make table of Desired Metadata Information ----
+  #Prepare Blank Data Frame
+    metadata_ds <- data.frame()
+    
+    ##  Loop: Look at each part of list and make table of Desired Metadata Information ----
     for (j in 1:length_metadata) {
       
       metadata_type <- metadata01[[j]][["ReportedAttribute"]][[1]][["@conceptID"]]
       
-      if (metadata_type == 'FREQ' | metadata_type == 'REF_AREA') {next} # We do not care about this metadata
+      #if (metadata_type == 'FREQ' | metadata_type == 'REF_AREA') {next} # Sometimes we do not care about this metadata
       
       attr_code <- metadata01[[j]]$ReportedAttribute[[1]]$Value$`#text`
       if (attr_code == "All_Indicators") {next}
       
-      metadata_final <- metadata01[[j]]$ReportedAttribute[[2]] %>%
-        mutate(db_code = database_id) %>%
+      metadata02 <- metadata01[[j]]$ReportedAttribute[[2]] %>%
+        mutate(ds_code = dsID) %>%
         mutate(metadata_type = metadata_type) %>%
         mutate(attr_code = attr_code) %>%
         mutate(metadata_attribute = `@conceptID`) %>%
         mutate(metadata_value = Value$`#text`) %>%
-        subset(select = c("db_code","metadata_type","attr_code","metadata_attribute","metadata_value"))
+        subset(select = c("ds_code","metadata_type","attr_code","metadata_attribute","metadata_value"))
       
       
       ### Put in longer table with other indicators ------------------------------------
       
-      meta_data_df <- rbind(meta_data_df,metadata_final)
+      metadata_ds <- rbind(metadata_ds,metadata02)
       
       ### Return Table
-      
-      
-    }
   }
-  return(meta_data_df)
+  return(metadata_ds)
 }
 
 #******************************************************************************#
@@ -93,7 +83,7 @@ getIMF_MetaData <- function(db_NamesID) {
 ##+ 
 #******************************************************************************#
 
-getIMF_Data <- function(dbIndicators_table) {
+getIMF_Data <- function(dsID,indicatorID,iso,date_start,date_end) {
   
   # Compact Data URL --
   url_imf_data <- 'http://dataservices.imf.org/REST/SDMX_JSON.svc/CompactData'
@@ -101,26 +91,23 @@ getIMF_Data <- function(dbIndicators_table) {
   #Prepare Blank Data Frame
   data_df <- data.frame()
   
-  ## First Loop: Pull Data for Each Database ----
-  for (i in rownames(dbIndicators_table)) {
+  # Get countries to pull. Will split if there is more than 10
+    if (dsID =="PCPS") {countries = "W00"
+    } else {countries = iso}
     
-    ### Set DB and corresponding URL ----
-    db_code <- as.character(dbIndicators_table[i,"database_id"])
-    indic_code <- as.character(dbIndicators_table[i,"indicator_code"])
-    #print(db_code)
-    #print(indic_code)
+  country_split <- split(countries, ceiling(seq_along(countries)/10))
+  
+  #Create blank data frame
+  countrystack_df <- data.frame()
     
-    if (db_code =="PCPS") {countries = "W00"
-    } else {countries = country_split}
-    
-    for (u in 1:length(countries)) {
-      if (db_code =="PCPS") { country_sub = countries
-      } else {country_sub_list <- country_split[u] %>% unlist
+    for (u in 1:length(country_split)) {
+      country_sub_list <- country_split[u] %>% unlist
       country_sub <- paste(country_sub_list, sep = '', collapse = '+')
-      }
-      #print(country_sub)
+
+
+  #Create final URL with all relevant information (dataset, indicator, country, etc.)
       url_imf_data_db <- sprintf('%s/%s/.%s.%s?startPeriod=%s&endPeriod=%s',
-                                 url_imf_data,db_code,country_sub,indic_code,date_start,date_end)
+                                 url_imf_data,dsID,country_sub,indicatorID,date_start,date_end)
       
       
       ### Pull full data from JSON
@@ -133,6 +120,8 @@ getIMF_Data <- function(dbIndicators_table) {
       observations <- overview$Obs
       length_data <- length(lapply(observations,length))
       
+      ## Prepare blank dataframe
+      data_df <- data.frame()
       
       ## Second Loop: Look at each part of list and make table of Desired Metadata Information ----
       for (j in 1:length_data) {
@@ -144,7 +133,7 @@ getIMF_Data <- function(dbIndicators_table) {
         sub_data <- observations[j] #This is the actual data (i.e year + amount)
         info_row <- overview[j,] %>% #This is the surrounding info about the data (i.e. indicator + country)
           mutate(rownum = j) %>%
-          mutate(database_id = db_code) %>%
+          mutate(dataset_id = ds_code) %>%
           subset(select = c(-Obs))
         
         data_final <- sub_data %>%
@@ -162,10 +151,9 @@ getIMF_Data <- function(dbIndicators_table) {
         ### Put in longer table with other indicators ------------------------------
         
         data_df <- bind_rows(data_df,data_final)
-        
-
-        
       }
+      countrystack_df <- bind_rows(countrystack_df,data_df)
+
       Sys.sleep(2)
       #Note: this was added after receiving the following error
       #under the theory that the error was caused by hitting a query threshold limit:
@@ -177,9 +165,7 @@ getIMF_Data <- function(dbIndicators_table) {
       
 
     }
-    
-  }
   
-  return(data_df)
+  return(countrystack_df)
   
 }

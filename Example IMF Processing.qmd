@@ -1,0 +1,110 @@
+---
+title: "Example IMF Processing"
+format: html
+editor: visual
+---
+
+# Background
+
+Downloading data from the IMF Data portal can be a little arduous (including a required sign-in). However the API is very useful. Initially, the imfr package supported much of the API pull, but it was not robust and was not updated (eventually removed from CRAN). In early 2023, many of these issues seem to be addressed via the [imfr github page](https://github.com/christophergandrud/imfr), but the package has still not returned to CRAN. In the mean time, I have been using my own functions, based on the original imfr package, as well as my own adaptions to expand functionality. Below are examples of interacting with my functions. Hopefully in the future, the imfr package will return, and all of this below will become obsolete.
+
+# Getting Started
+
+Here we create the objects we will need to run this program. The first is to run the script with the IMF API functions. Then create (or import) a table of desired indicators and countries for the data pull.
+
+## Libraries
+
+```{r libs}
+if(!require(janitor))install.packages("janitor")
+if(!require(tidyverse))install.packages("tidyverse")
+if(!require(jsonlite))install.packages("jsonlite")
+```
+
+## Set Up
+
+```{r setup}
+
+# Save functions to objects
+source("IMF API Functions.R")
+
+# Create a table of desired indicators
+imf_Indicators_Full <- data.frame(dataset_id = c("PCPS","PCPS","CPI","CPI"),
+                                  indicator_code = c("PFOOD","PNRG","PCPI_IX","PCPIF_IX"))
+
+# Create a list of the desired datasets 
+imf_ds_list <- imf_Indicators_Full %>%
+  distinct(dataset_id) %>%
+  pull(dataset_id)
+
+# Create a list of countries whose data to pull, using their iso2 codes. For 'World' data (for example PCPS), the program will automatically pull "W00" instead of this list.
+
+iso2list <- c("BJ","BF","TG")
+
+# Specify start and end years
+
+year_start <- 2000
+year_end   <- 2023
+
+```
+
+# Pull Data from API
+
+## Get List of Dataset IDs and Names
+
+Get Simple list of datasets IDs and Names; filter to the ones you want.
+
+```{r dataset_pull}
+
+imf_datasets <- getIMF_dsInfo() %>% # Call dsInfo function
+  
+  ## Filter to only relevant Databases
+    subset(dataset_id %in% imf_ds_list)
+
+```
+
+## Get Metadata
+
+Using the table created in the previous step, create a for loop to get the metadata for every dataset of interest.
+
+```{r metadata_pull}
+
+#Prepare Blank Data Frame
+  imf_metadata <- data.frame()
+
+# First Loop: Pull Metadata for Each Database
+for (i in 1:length(imf_ds_list)) {
+  # Get the ID only
+    dsID <- imf_ds_list[i]
+  # Run Metadata function
+    new_metadata <- getIMF_MetaData(dsID)
+    
+  # Bind rows together
+    imf_metadata <- rbind(imf_metadata,new_metadata)
+}
+ rm(new_metadata)
+```
+
+## Get all IMF Data
+
+```{r indicator_data_pull}
+
+#Prepare Blank Data Frame
+  imf_data <- data.frame()
+
+# Loop through each row of the indicators
+
+  for (i in rownames(imf_Indicators_Full)) {
+    
+    ### Set Dataset and Indicator ----
+    ds_code <- as.character(imf_Indicators_Full[i,"dataset_id"])
+    indic_code <- as.character(imf_Indicators_Full[i,"indicator_code"])
+  
+    ## Pull respective data from the dataset, but indicator and ISO
+    imf_byIndic <- getIMF_Data(ds_code,indic_code,iso2list,year_start,year_end)
+    
+    ## Bind together with existing table
+      imf_data <- bind_rows(imf_data,imf_byIndic) #Note bind_rows as columns may not be the same across datasets.
+  }
+  
+rm(imf_byIndic)
+```
